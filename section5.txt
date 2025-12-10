@@ -1,0 +1,9 @@
+To handle payments securely, I would create a server endpoint that starts a Stripe Checkout Session. 
+I would attach the application_id as hidden metadata to this session so we can link the payment back to the correct user. 
+The frontend then simply redirects the user to Stripe’s hosted page to pay.
+
+Crucially, I wouldn't trust the user's browser to confirm the payment. 
+Instead, I would listen for a Stripe Webhook (a secure background message) on my server. 
+When Stripe notifies me that the checkout.session.completed, 
+I would verify the message is authentic, use the stored ID to find the application, 
+mark the status as 'Paid', and automatically move the application stage to 'Submitted'.

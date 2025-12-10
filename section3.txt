@@ -1,0 +1,77 @@
+I have deployed the edge function on supabase itself (on the browser).
+Here is the code for it.
+
+
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const { application_id, task_type, due_at, title } = await req.json()
+    const validTypes = ['call', 'email', 'review']  //validation check
+    if (!validTypes.includes(task_type)) {
+      throw new Error(`Invalid task_type. Must be one of: ${validTypes.join(', ')}`)
+    }
+
+    const dueDate = new Date(due_at)
+    const now = new Date()   //validation check
+    if (dueDate <= now) {
+      throw new Error('due_at must be in the future')
+    }
+
+    // Initialize Supabase Client (Admin Mode)
+    // We use the Service Role Key to bypass RLS so we can insert freely
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    //Insert the Task into the Database
+    const { data, error } = await supabaseAdmin
+      .from('tasks')
+      .insert([
+        {
+          related_id: application_id,
+          type: task_type,
+          due_at: due_at,
+          title: title || `New ${task_type} task`,
+          status: 'open',
+          tenant_id: '00000000-0000-0000-0000-000000000000'
+        }
+      ])
+      .select()
+      .single()
+
+    if (error) throw error
+
+    // BROADCAST: Send a realtime message 
+    await supabaseAdmin.rpc('notify_task_created', { payload: data })
+
+    return new Response(
+      JSON.stringify({ success: true, task_id: data.id }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      }
+    )
+  } catch (error) {
+    // Handle Errors
+    return new Response(
+      JSON.stringify({ success: false, error: error.message }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400,
+      }
+    )
+  }
+})
